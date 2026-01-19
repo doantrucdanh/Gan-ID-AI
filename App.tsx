@@ -31,16 +31,13 @@ const App: React.FC = () => {
 
   const stopRef = useRef(false);
 
-  // Load data on startup
   useEffect(() => {
-    // 1. Load API Key
     const savedKey = localStorage.getItem('gemini_api_key');
     if (savedKey) {
       setApiKey(savedKey);
       setTempKey(savedKey);
     }
 
-    // 2. Load MapID persistence
     const savedMapContent = localStorage.getItem('mapper_ai_map_content');
     const savedMapFileName = localStorage.getItem('mapper_ai_map_filename');
 
@@ -89,8 +86,6 @@ const App: React.FC = () => {
           setMapSample(summary);
           setMapContent(content);
           setMapFileName(file.name);
-          
-          // Save to localStorage for persistence
           localStorage.setItem('mapper_ai_map_content', content);
           localStorage.setItem('mapper_ai_map_filename', file.name);
         } catch (err) {
@@ -119,6 +114,26 @@ const App: React.FC = () => {
       return;
     }
 
+    const client = new GeminiClient();
+    
+    // Bước 1: Kiểm tra tính khả dụng của Key
+    try {
+      setProcessing(prev => ({ ...prev, isProcessing: true }));
+      await client.verifyKey();
+    } catch (err: any) {
+      setProcessing(prev => ({ ...prev, isProcessing: false }));
+      if (err.message === "API_KEY_INVALID") {
+        alert("API Key của bạn không hợp lệ hoặc đã bị vô hiệu hóa. Vui lòng cập nhật mã mới!");
+        setShowKeyModal(true);
+      } else if (err.message === "QUOTA_EXCEEDED") {
+        alert("API Key này đã hết hạn mức (Quota) hoặc đang bị giới hạn tốc độ. Vui lòng thử lại sau hoặc đổi mã mới!");
+        setShowKeyModal(true);
+      } else {
+        alert("Lỗi kết nối API: " + (err.message || "Không xác định"));
+      }
+      return;
+    }
+
     stopRef.current = false;
     setFinalTex(null);
     setFinalResults([]);
@@ -126,6 +141,7 @@ const App: React.FC = () => {
     const matches = extractExercisesWithPositions(texContent);
     if (matches.length === 0) {
       alert("Không tìm thấy câu hỏi (ex, bt, vd) nào trong tệp TeX.");
+      setProcessing(prev => ({ ...prev, isProcessing: false }));
       return;
     }
 
@@ -136,7 +152,6 @@ const App: React.FC = () => {
       results: [],
     });
 
-    const client = new GeminiClient();
     const accumulatedResults: (QuestionProcessResult & { start: number; end: number })[] = [];
 
     for (let i = 0; i < matches.length; i++) {
@@ -148,7 +163,6 @@ const App: React.FC = () => {
       
       try {
         const aiResult = await client.analyze(questionContent.slice(0, 3000), mapSample, knowledge, useThinking);
-        
         const code = `[${aiResult.lop}${aiResult.mon}${aiResult.chuong}${aiResult.muc_do}${aiResult.bai}-${aiResult.dang}]`;
         
         const res: QuestionProcessResult & { start: number; end: number } = {
@@ -166,9 +180,14 @@ const App: React.FC = () => {
         accumulatedResults.push(res);
         setProcessing(prev => ({ ...prev, current: i + 1, results: [res, ...prev.results] }));
       } catch (err: any) {
-        let msg = "Lỗi hệ thống";
-        if (err.message === "API_KEY_INVALID") msg = "API Key không hợp lệ.";
-        else if (err.message === "QUOTA_EXCEEDED") msg = "Hết hạn mức API.";
+        let msg = "Lỗi hệ thống không xác định";
+        if (err.message === "API_KEY_INVALID") {
+          msg = "API Key không hợp lệ!";
+          setShowKeyModal(true);
+        } else if (err.message === "QUOTA_EXCEEDED") {
+          msg = "Hết hạn mức API (Quota Exceeded)!";
+          setShowKeyModal(true);
+        }
         
         alert(`Dừng xử lý: ${msg}`);
         stopRef.current = true;
@@ -176,7 +195,7 @@ const App: React.FC = () => {
       }
       
       if (!stopRef.current) {
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, 800)); // Delay để tránh spam rate limit
       }
     }
 
@@ -221,7 +240,6 @@ const App: React.FC = () => {
       
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
         
-        {/* Sidebar */}
         <aside className="w-full lg:w-80 flex-shrink-0 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 overflow-y-auto">
           <div>
             <h1 className="text-2xl font-black bg-gradient-to-r from-indigo-600 to-blue-600 bg-clip-text text-transparent tracking-tight">🎯 Mapper AI</h1>
@@ -311,10 +329,7 @@ const App: React.FC = () => {
           </div>
         </aside>
 
-        {/* Main Content Area */}
         <main className="flex-1 flex flex-col min-h-0 bg-slate-50">
-          
-          {/* Progress Banner */}
           {processing.total > 0 && (
             <div className="bg-white border-b border-slate-200 px-6 py-4 flex-shrink-0">
               <div className="flex items-center gap-4">
@@ -334,7 +349,6 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* Table Container */}
           <div className="flex-1 flex flex-col min-h-0 m-6 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 flex-shrink-0">
               <h2 className="font-black text-xs uppercase tracking-widest text-slate-500">Danh sách câu hỏi</h2>
@@ -360,7 +374,7 @@ const App: React.FC = () => {
                   {processing.results.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-6 py-24 text-center text-slate-300 italic font-bold">
-                        {processing.isProcessing ? 'Đang phân tích câu hỏi...' : 'Chưa có dữ liệu. Vui lòng tải file và chạy gán ID.'}
+                        {processing.isProcessing ? 'Đang chuẩn bị phân tích...' : 'Chưa có dữ liệu. Vui lòng tải file và chạy gán ID.'}
                       </td>
                     </tr>
                   ) : (
@@ -398,7 +412,6 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {/* Modal API Key */}
       {showKeyModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
