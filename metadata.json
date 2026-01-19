@@ -1,0 +1,5 @@
+{
+  "name": "GÁN ID TỰ ĐỘNG",
+  "description": "Một công cụ tiên tiến dành cho giáo viên toán học Việt Nam, tự động gán mã MapID 6 tham số cho các câu hỏi dựa trên TeX bằng trí tuệ nhân tạo Google Gemini. Hỗ trợ xử lý hàng loạt, kiểm tra tính hợp lệ và xuất sang định dạng TeX.",
+  "requestFramePermissions": []
+}
