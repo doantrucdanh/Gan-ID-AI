@@ -1,6 +1,13 @@
 
 import { MapIDStructure, MapIDItem } from '../types';
 
+export interface ExerciseMatch {
+  block: string;
+  env: string;
+  startIndex: number;
+  endIndex: number;
+}
+
 export const parseMapID = (content: string): { mapid: MapIDStructure; mucDoMap: Record<string, string> } => {
   const mapid: MapIDStructure = {};
   const mucDoMap: Record<string, string> = {};
@@ -21,36 +28,35 @@ export const parseMapID = (content: string): { mapid: MapIDStructure; mucDoMap: 
       continue;
     }
 
-    const dashMatch = line.match(/^(\s*)-+\[(.+?)\]\s+(.+)/);
+    const dashMatch = line.match(/^(\s*)(-+)\[(.+?)\]\s+(.*)/);
     if (!dashMatch) continue;
 
-    const fullMatch = dashMatch[0];
-    const dashCount = fullMatch.indexOf('[') - (fullMatch.length - fullMatch.trimStart().length);
-    const code = dashMatch[2].trim();
-    const name = dashMatch[3].trim();
+    const leadingDashes = dashMatch[2].length;
+    const code = dashMatch[3].trim();
+    const name = dashMatch[4].trim();
 
-    if (dashCount === 1) {
+    if (leadingDashes === 1) {
       currentLop = code;
       if (!mapid[currentLop]) mapid[currentLop] = {};
       currentMon = currentChuong = currentBai = null;
     } 
-    else if (dashCount === 4 && currentLop) {
+    else if (leadingDashes === 4 && currentLop) {
       currentMon = code;
       if (!mapid[currentLop][currentMon]) mapid[currentLop][currentMon] = {};
       currentChuong = currentBai = null;
     }
-    else if (dashCount === 7 && currentLop && currentMon) {
+    else if (leadingDashes === 7 && currentLop && currentMon) {
       currentChuong = code;
       if (!mapid[currentLop][currentMon][currentChuong]) mapid[currentLop][currentMon][currentChuong] = {};
       currentBai = null;
     }
-    else if (dashCount === 10 && currentLop && currentMon && currentChuong) {
+    else if (leadingDashes === 10 && currentLop && currentMon && currentChuong) {
       currentBai = code;
       if (!mapid[currentLop][currentMon][currentChuong][currentBai]) {
         mapid[currentLop][currentMon][currentChuong][currentBai] = {};
       }
     }
-    else if (dashCount === 13 && currentLop && currentMon && currentChuong && currentBai) {
+    else if (leadingDashes === 13 && currentLop && currentMon && currentChuong && currentBai) {
       mapid[currentLop][currentMon][currentChuong][currentBai][code] = name;
     }
   }
@@ -69,8 +75,9 @@ export const buildKnowledge = (mapid: MapIDStructure): { data: MapIDItem[]; summ
       Object.entries(chs).forEach(([chuong, bais]) => {
         summaryLines.push(`    * Chương ${chuong}:`);
         Object.entries(bais).forEach(([bai, dangs]) => {
-          summaryLines.push(`      + Bài ${bai}: ${Object.keys(dangs).length} dạng`);
+          summaryLines.push(`      + Bài ${bai}:`);
           Object.entries(dangs).forEach(([dcode, dname]) => {
+            summaryLines.push(`        > Dạng ${dcode}: ${dname}`);
             data.push({
               lop,
               mon,
@@ -88,9 +95,24 @@ export const buildKnowledge = (mapid: MapIDStructure): { data: MapIDItem[]; summ
   return { data, summary: summaryLines.join('\n') };
 };
 
-export const extractExercises = (content: string): string[] => {
-  // Regex hỗ trợ ex, bt, và vd
+/**
+ * Bóc tách câu hỏi và ghi lại vị trí chính xác trong file gốc
+ */
+export const extractExercisesWithPositions = (content: string): ExerciseMatch[] => {
+  const matches: ExerciseMatch[] = [];
   const regex = /\\begin\{(ex|bt|vd)\}([\s\S]*?)\\end\{\1\}/g;
-  const matches = content.match(regex);
-  return matches || [];
+  let m;
+  while ((m = regex.exec(content)) !== null) {
+    matches.push({
+      block: m[0],
+      env: m[1],
+      startIndex: m.index,
+      endIndex: regex.lastIndex
+    });
+  }
+  return matches;
+};
+
+export const extractExercises = (content: string): string[] => {
+  return extractExercisesWithPositions(content).map(m => m.block);
 };

@@ -6,16 +6,22 @@ import { AIResult, MapIDItem } from "../types";
 export class GeminiClient {
   private maxRetries = 2;
 
-  private async callAIWithRetry(prompt: string, useThinking: boolean = true): Promise<AIResult> {
-    let lastError: any;
+  private async callAIWithRetry(prompt: string, useThinking: boolean = false): Promise<AIResult> {
+    const storedKey = localStorage.getItem('gemini_api_key');
+    const finalKey = storedKey || (process.env.API_KEY as string);
+
+    if (!finalKey) {
+      throw new Error("API_KEY_MISSING");
+    }
     
+    let lastError: any;
     for (let attempt = 0; attempt < this.maxRetries; attempt++) {
       try {
-        // Tạo instance mới mỗi lần gọi để đảm bảo lấy API key mới nhất từ môi trường
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        const ai = new GoogleGenAI({ apiKey: finalKey });
         
         const config: any = {
-          temperature: 0.1,
+          temperature: 0.1, // Giữ nhiệt độ thấp để AI phản hồi ổn định, không sáng tạo lung tung
+          topP: 0.95,
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -32,27 +38,29 @@ export class GeminiClient {
           }
         };
 
-        if (useThinking) {
-          config.thinkingConfig = { thinkingBudget: 4000 };
-        }
-
         const response = await ai.models.generateContent({
           model: MODEL_NAME,
-          contents: prompt,
+          contents: { parts: [{ text: prompt }] },
           config
         });
 
         const text = response.text?.trim() || "{}";
-        return JSON.parse(text);
+        const parsed = JSON.parse(text);
+        
+        // Chuẩn hóa muc_do về in hoa
+        if (parsed.muc_do) parsed.muc_do = parsed.muc_do.toUpperCase();
+        
+        return parsed;
       } catch (error: any) {
         lastError = error;
+        const errorMsg = error?.message || "";
         
-        // Kiểm tra lỗi đặc thù khi API Key không hợp lệ hoặc project không tìm thấy
-        if (error?.message?.includes("Requested entity was not found")) {
+        if (error?.status === 401 || errorMsg.includes("API key not valid")) {
           throw new Error("API_KEY_INVALID");
         }
-
-        const delay = error?.status === 429 ? 5000 : 2000;
+        
+        // Nếu lỗi quá tải (429) thì chờ lâu hơn
+        const delay = error?.status === 429 ? 4000 : 1500;
         if (attempt < this.maxRetries - 1) {
           await new Promise(resolve => setTimeout(resolve, delay * (attempt + 1)));
         }
@@ -65,11 +73,12 @@ export class GeminiClient {
     question: string,
     mapidSample: string,
     validCodes: MapIDItem[],
-    useThinking: boolean = true
+    useThinking: boolean = false
   ): Promise<AIResult> {
     const prompt1 = MAIN_PROMPT.replace('{q}', question).replace('{mapid_sample}', mapidSample);
     let result = await this.callAIWithRetry(prompt1, useThinking);
 
+    // Hàm kiểm tra xem bộ mã AI trả về có thực sự tồn tại trong file MapID không
     const checkValidity = (res: AIResult) => 
       validCodes.some(c => 
         c.lop === res.lop && 
@@ -81,6 +90,7 @@ export class GeminiClient {
 
     let isValid = checkValidity(result);
 
+    // Nếu không khớp, thực hiện bước Fallback để AI sửa lỗi dựa trên danh sách chuẩn
     if (!isValid) {
       const prompt2 = FALLBACK_PROMPT
         .replace('{q}', question)
@@ -94,7 +104,7 @@ export class GeminiClient {
           isValid = true;
         }
       } catch (e) {
-        console.warn("Fallback check failed:", e);
+        console.warn("Lỗi khi thực hiện bước sửa lỗi ID:", e);
       }
     }
 
