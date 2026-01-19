@@ -5,6 +5,9 @@ import { parseMapID, buildKnowledge, extractExercises } from './services/parserS
 import { MapIDItem, ProcessingState, QuestionProcessResult } from './types';
 import { StatusBadge } from './components/StatusBadge';
 
+// Removed explicit 'declare global' for aistudio to avoid duplication and modifier mismatch errors 
+// as the platform already provides the 'AIStudio' type.
+
 const App: React.FC = () => {
   const [mapContent, setMapContent] = useState<string | null>(null);
   const [texContent, setTexContent] = useState<string | null>(null);
@@ -15,6 +18,7 @@ const App: React.FC = () => {
   const [useThinking, setUseThinking] = useState(true);
   const [viewMode, setViewMode] = useState<'short' | 'full'>('short');
   const [isMapFromStorage, setIsMapFromStorage] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState<boolean>(false);
 
   const [processing, setProcessing] = useState<ProcessingState>({
     isProcessing: false,
@@ -28,8 +32,19 @@ const App: React.FC = () => {
 
   const stopRef = useRef(false);
 
-  // Tự động nạp MapID từ localStorage khi khởi chạy
+  // Kiểm tra trạng thái API Key khi khởi chạy
   useEffect(() => {
+    const checkKey = async () => {
+      // Access aistudio using type assertion to satisfy TypeScript without conflicting declarations
+      const aistudio = (window as any).aistudio;
+      if (aistudio) {
+        const selected = await aistudio.hasSelectedApiKey();
+        setHasApiKey(selected);
+      }
+    };
+    checkKey();
+
+    // Nạp MapID từ bộ nhớ
     const savedMapContent = localStorage.getItem('mapper_ai_map_content');
     const savedMapFileName = localStorage.getItem('mapper_ai_map_filename');
 
@@ -50,6 +65,15 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const handleOpenKeySelector = async () => {
+    const aistudio = (window as any).aistudio;
+    if (aistudio) {
+      await aistudio.openSelectKey();
+      // Giả định chọn thành công theo hướng dẫn SDK để tránh race condition
+      setHasApiKey(true);
+    }
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, type: 'map' | 'tex') => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -65,14 +89,11 @@ const App: React.FC = () => {
             alert("Không tìm thấy dữ liệu MapID hợp lệ.");
             return;
           }
-          // Lưu vào state
           setKnowledge(data);
           setMapSample(summary);
           setMapContent(content);
           setMapFileName(file.name);
           setIsMapFromStorage(false);
-
-          // Lưu vào localStorage
           localStorage.setItem('mapper_ai_map_content', content);
           localStorage.setItem('mapper_ai_map_filename', file.name);
         } catch (err) {
@@ -102,6 +123,17 @@ const App: React.FC = () => {
 
   const startProcessing = async () => {
     if (!texContent || !mapSample || knowledge.length === 0) return;
+    
+    const aistudio = (window as any).aistudio;
+    // Yêu cầu chọn API key nếu chưa có
+    if (!hasApiKey && aistudio) {
+      const confirmKey = window.confirm("Bạn cần cấp quyền API (sử dụng Project GCP cá nhân) để ứng dụng có thể hoạt động. Mở hộp thoại chọn khóa ngay?");
+      if (confirmKey) {
+        await handleOpenKeySelector();
+      } else {
+        return;
+      }
+    }
 
     stopRef.current = false;
     setFinalTex(null);
@@ -160,6 +192,14 @@ const App: React.FC = () => {
           results: [res, ...prev.results]
         }));
       } catch (err: any) {
+        // Xử lý lỗi API Key không hợp lệ
+        if (err.message === "API_KEY_INVALID") {
+          alert("Lỗi: API Key hoặc Project GCP không tìm thấy. Vui lòng chọn lại API Key.");
+          setHasApiKey(false);
+          stopRef.current = true;
+          break;
+        }
+
         const res: QuestionProcessResult = {
           index: i + 1,
           questionPreview: questionContent,
@@ -228,6 +268,32 @@ const App: React.FC = () => {
               <p className="text-[10px] text-slate-400 mb-8 uppercase tracking-[0.2em] font-bold">Smart ID Tagger (EX/BT/VD)</p>
 
               <div className="space-y-6">
+                {/* API Key Configuration Section */}
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 transition-all hover:bg-white">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                      🔑 Quyền truy cập API
+                    </span>
+                    <span className={`w-2 h-2 rounded-full ${hasApiKey ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500 animate-pulse'}`}></span>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <button 
+                      onClick={handleOpenKeySelector}
+                      className={`w-full py-2.5 rounded-xl text-[11px] font-black transition-all flex items-center justify-center gap-2 ${
+                        hasApiKey 
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                        : 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 hover:-translate-y-0.5'
+                      }`}
+                    >
+                      {hasApiKey ? '✅ ĐÃ CẤP QUYỀN API' : '⚡ CẤP QUYỀN API (GCP)'}
+                    </button>
+                    <p className="text-[9px] text-slate-400 leading-tight italic">
+                      Bạn cần dùng Project GCP đã bật <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="text-indigo-500 underline font-bold">Thanh toán</a> để hoạt động.
+                    </p>
+                  </div>
+                </div>
+
                 <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100/50 transition-all hover:bg-indigo-50">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-black text-indigo-900 uppercase tracking-tighter flex items-center gap-1.5">
@@ -248,7 +314,6 @@ const App: React.FC = () => {
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">📁 Tệp tin đầu vào</span>
                   </div>
                   
-                  {/* MapID Upload Card */}
                   <div className="relative group">
                     <label className="block cursor-pointer">
                       <input type="file" accept=".tex,.txt" onChange={(e) => handleFileChange(e, 'map')} className="hidden" />
@@ -280,7 +345,6 @@ const App: React.FC = () => {
                     )}
                   </div>
 
-                  {/* TeX Upload Card */}
                   <label className="block cursor-pointer">
                     <input type="file" accept=".tex" onChange={(e) => handleFileChange(e, 'tex')} className="hidden" />
                     <div className={`px-4 py-4 rounded-2xl border-2 border-dashed transition-all flex items-center gap-4 ${
