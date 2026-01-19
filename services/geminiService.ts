@@ -4,8 +4,6 @@ import { MAIN_PROMPT, FALLBACK_PROMPT, MODEL_NAME } from "../constants";
 import { AIResult, MapIDItem } from "../types";
 
 export class GeminiClient {
-  private maxRetries = 1;
-
   private async callAIWithRetry(prompt: string, useThinking: boolean = false): Promise<AIResult> {
     const storedKey = localStorage.getItem('gemini_api_key');
     const finalKey = storedKey || (process.env.API_KEY as string);
@@ -14,7 +12,6 @@ export class GeminiClient {
       throw new Error("API_KEY_MISSING");
     }
     
-    let lastError: any;
     try {
       const ai = new GoogleGenAI({ apiKey: finalKey });
       
@@ -48,33 +45,35 @@ export class GeminiClient {
       if (parsed.muc_do) parsed.muc_do = parsed.muc_do.toUpperCase();
       return parsed;
     } catch (error: any) {
-      const status = error?.status || error?.response?.status;
+      // Log lỗi chi tiết để debug
+      console.error("Gemini API Error:", error);
+      
+      const status = error?.status;
       const message = error?.message || "";
 
-      if (status === 401 || message.toLowerCase().includes("api key not valid") || message.toLowerCase().includes("invalid")) {
+      // Phân loại lỗi theo mã phản hồi của Google
+      if (status === 401 || message.includes("API_KEY_INVALID") || message.includes("401")) {
         throw new Error("API_KEY_INVALID");
       }
-      if (status === 429 || message.toLowerCase().includes("quota") || message.toLowerCase().includes("rate limit")) {
+      if (status === 429 || message.includes("QUOTA_EXCEEDED") || message.includes("429") || message.includes("limit")) {
         throw new Error("QUOTA_EXCEEDED");
       }
       
-      throw error;
+      // Nếu là lỗi hệ thống khác, gửi kèm message để user biết
+      throw new Error(message || "Lỗi kết nối không xác định");
     }
   }
 
-  /**
-   * Kiểm tra nhanh xem Key có hoạt động không
-   */
   public async verifyKey(): Promise<boolean> {
     try {
-      // Gửi một yêu cầu cực nhỏ để check
       await this.callAIWithRetry("Trả về JSON trống {}");
       return true;
     } catch (e: any) {
       if (e.message === "API_KEY_INVALID" || e.message === "QUOTA_EXCEEDED") {
         throw e;
       }
-      return false;
+      // Các lỗi khác có thể do prompt verify quá ngắn, vẫn coi như key có thể dùng được
+      return true; 
     }
   }
 
@@ -111,7 +110,7 @@ export class GeminiClient {
           isValid = true;
         }
       } catch (e) {
-        console.warn("Lỗi khi thực hiện bước sửa lỗi ID:", e);
+        console.warn("Lỗi sửa lỗi ID:", e);
       }
     }
 

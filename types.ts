@@ -48,3 +48,5 @@ export interface ProcessingState {
   total: number;
   results: QuestionProcessResult[];
 }
+
+export type ApiKeyStatus = 'idle' | 'checking' | 'valid' | 'invalid' | 'quota_exceeded' | 'error';
